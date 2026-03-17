@@ -126,7 +126,9 @@
   const zoom  = document.getElementById('zoom');
 
   let spinTimer  = null;
-  let animToken  = 0;   // 用于取消进行中的异步动画
+  let animToken  = 0;
+  let currentPageTickets = [];   // 当前大屏展示的 16 张票
+  let absentSet  = new Set();    // 已标记缺席的票号
 
   /* ─── 工具 ─── */
   function pad2(n) { return String(n).padStart(2, '0'); }

@@ -469,13 +469,13 @@
       if (state.firstPrizeTickets.length !== FIRST_PRIZE_COUNT) return;
       renderFirstPrize(1);
       updateScreenSwitchPanel(1);
-      postToScreen({ action: 'first:showPage', page: 1, tickets: state.firstPrizeTickets.slice(0, 16) });
+      postToScreen({ action: 'first:showPage', page: 1, tickets: state.firstPrizeTickets.slice(0, 16), absent: state.firstPrizeAbsent });
     });
     els.showPage2.addEventListener('click', function () {
       if (state.firstPrizeTickets.length !== FIRST_PRIZE_COUNT) return;
       renderFirstPrize(2);
       updateScreenSwitchPanel(2);
-      postToScreen({ action: 'first:showPage', page: 2, tickets: state.firstPrizeTickets.slice(16) });
+      postToScreen({ action: 'first:showPage', page: 2, tickets: state.firstPrizeTickets.slice(16), absent: state.firstPrizeAbsent });
     });
 
     els.focusTickets.addEventListener('click', handleFocusClick);
