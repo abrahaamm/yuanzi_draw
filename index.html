@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>学生节抽奖系统</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <h1 class="title">学生节抽奖系统</h1>
+      <div class="round-indicator">
+        <span class="round-label">当前轮次</span>
+        <span class="round-name" id="roundName">—</span>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- 第一轮：三等奖 -->
+      <section class="round-section" id="round1Section">
+        <h2 class="section-title">三等奖 · POWER 字母抽 3 次</h2>
+        <p class="section-desc">每次抽 1 个字母，共 3 个中奖字母（去重）</p>
+        <div class="result-area result-letters" id="round1Result"></div>
+        <button class="btn btn-primary" id="drawRound1">抽取三等奖</button>
+      </section>
+
+      <!-- 第二轮：二等奖 -->
+      <section class="round-section" id="round2Section">
+        <h2 class="section-title">二等奖 · 号码池 1-48 抽 12 个</h2>
+        <p class="section-desc">动画每帧保持 9 个亮灯，最终确定 12 个中奖号码</p>
+        <div class="grid-4x3" id="round2Grid"></div>
+        <button class="btn btn-primary" id="drawRound2">抽取二等奖</button>
+      </section>
+
+      <!-- 第三轮：一等奖 -->
+      <section class="round-section" id="round3Section">
+        <h2 class="section-title">一等奖 · 字母+号码共 32 个（16×2 屏）</h2>
+        <p class="section-desc">排除二等奖号码；两屏结果互不重复；可点名放大无人响应号码</p>
+        <div class="result-area result-tickets grid-tickets" id="round3Result"></div>
+        <button class="btn btn-primary" id="drawRound3">抽取一等奖</button>
+        <div class="screen-switch-panel" id="screenSwitchPanel" style="display:none">
+          <div class="screen-switch-status">
+            <span class="screen-label">当前大屏</span>
+            <span class="screen-current" id="screenCurrent">第 1 屏</span>
+          </div>
+          <div class="screen-switch-btns">
+            <button class="btn btn-page active" id="btnShowPage1">第 1 屏</button>
+            <button class="btn btn-page" id="btnShowPage2">第 2 屏</button>
+          </div>
+        </div>
+        <div class="focus-panel">
+          <p class="section-desc compact">点击号码即可在大屏全屏放大（用于无人响应点名）</p>
+          <div class="focus-tickets" id="focusTickets"></div>
+        </div>
+
+        <!-- 补抽区域 -->
+        <div class="supplement-panel" id="supplementPanel" style="display:none">
+          <div class="supplement-header">
+            <span class="supplement-label">补抽（未响应替换）</span>
+            <span class="supplement-pool-count" id="supplementPoolCount"></span>
+          </div>
+          <button class="btn btn-warn" id="btnSupplement">补抽 1 个</button>
+          <div class="supplement-history" id="supplementHistory"></div>
+        </div>
+      </section>
+
+      <!-- 第四轮：特等奖 -->
+      <section class="round-section" id="round4Section">
+        <h2 class="section-title">特等奖 · 抽 1 组 字母+号码</h2>
+        <p class="section-desc">按预案抽取 1 名特等奖</p>
+        <div class="result-area result-special" id="round4Result"></div>
+        <button class="btn btn-primary" id="drawRound4">抽取特等奖</button>
+      </section>
+
+      <div class="nav-buttons">
+        <button class="btn btn-screen" id="btnOpenScreen">打开大屏展示</button>
+        <button class="btn btn-secondary" id="btnPrevRound">上一轮</button>
+        <button class="btn btn-secondary" id="btnNextRound">下一轮</button>
+        <button class="btn btn-outline" id="btnReset">重新开始</button>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <p>奖券格式：字母(P/O/W/E/R) + 数字(1-48) · 总池 240 张</p>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>学生节抽奖大屏</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 100vw;
+      height: 100vh;
+      background: #000;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* 16:9 全画布 stage */
+    #stage {
+      position: relative;
+      width: min(100vw, 177.78vh);
+      height: min(100vh, 56.25vw);
+      background: #000;
+      overflow: hidden;
+    }
+
+    /* 每一层都铺满 stage */
+    .layer {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .layer img,
+    .layer video {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: fill;
+    }
+
+    /* 叠图层：黑色部分 screen 混合后透明 */
+    .overlay {
+      mix-blend-mode: screen;
+      opacity: 0;
+    }
+
+    .overlay.lit {
+      opacity: 1;
+    }
+
+    .overlay.fadein {
+      transition: opacity 0.38s ease-in;
+    }
+
+    /* 白闪 */
+    #flash {
+      position: fixed;
+      inset: 0;
+      background: #fff;
+      opacity: 0;
+      pointer-events: none;
+      z-index: 800;
+    }
+
+    #flash.go {
+      animation: doFlash 0.45s ease-out forwards;
+    }
+
+    @keyframes doFlash {
+      0%   { opacity: 0; }
+      28%  { opacity: 1; }
+      100% { opacity: 0; }
+    }
+
+    /* 全屏放大（一等奖点名） */
+    #zoom {
+      position: fixed;
+      inset: 0;
+      background: #000;
+      z-index: 1000;
+      display: none;
+      cursor: pointer;
+    }
+
+    #zoom.active { display: block; }
+
+    #zoom .layer img { object-fit: fill; }
+  </style>
+</head>
+<body>
+
+<div id="stage"></div>
+<div id="flash"></div>
+<div id="zoom"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ─── 路径常量 ─── */
+  const S  = './抽奖素材(1)';
+  const BG = './背景';
+
+  const R1_BG   = BG + '/1.png';   // 背景/1.png：POWER 暗灯底图
+  const R2_BG   = BG + '/2.png';   // 背景/2.png：01-50 号码暗灯底图
+  const R3_BG   = BG + '/3.png';   // 背景/3.png：星空背景
+  const R3_VID  = S + '/第三轮/十连出金.mp4';
+
+  function r1Letter(l)       { return S + '/第一轮/' + l + '.png'; }
+  function r2Num(n)          { return S + '/第二轮/' + pad2(n) + '.png'; }
+  function r3Pos(pos, n)     { return S + '/第三轮/位置' + pos + '/' + pad2(n) + '.png'; }
+  function r3PosL(pos, l)    { return S + '/第三轮/位置' + pos + '/' + l + '.png'; }
+  function presetNum(n)      { return S + '/第三轮/预案/' + pad2(n) + '.png'; }
+  function presetLetter(l)   { return S + '/第三轮/预案/' + l + '.png'; }
+
+  const LETTERS    = ['P', 'O', 'W', 'E', 'R'];
+  const ALL_NUMS   = Array.from({ length: 48 }, (_, i) => i + 1);
+  const STORAGE_KEY = 'power_lottery_state_v2';
+  const CMD_KEY     = 'student_lottery_cmd';
+
+  const stage = document.getElementById('stage');
+  const flash = document.getElementById('flash');
+  const zoom  = document.getElementById('zoom');
+
+  let spinTimer  = null;
+  let animToken  = 0;   // 用于取消进行中的异步动画
+
+  /* ─── 工具 ─── */
+  function pad2(n) { return String(n).padStart(2, '0'); }
+
+  function parseTicket(t) {
+    const m = /^([A-Z])(\d+)$/.exec(String(t));
+    return m ? [m[1], Number(m[2])] : [null, null];
+  }
+
+  function delay(ms) {
+    return new Promise(function (res) { setTimeout(res, ms); });
+  }
+
+  function randPick(arr, count) {
+    const a = arr.slice();
+    const out = [];
+    while (a.length && out.length < count) {
+      const i = Math.floor(Math.random() * a.length);
+      out.push(a.splice(i, 1)[0]);
+    }
+    return out;
+  }
+
+  /* ─── 舞台元素操作 ─── */
+  function clearStage() {
+    if (spinTimer) { clearInterval(spinTimer); spinTimer = null; }
+    stage.innerHTML = '';
+  }
+
+  function addLayer(src, cls, id) {
+    const div = document.createElement('div');
+    div.className = 'layer' + (cls ? ' ' + cls : '');
+    if (id) div.id = id;
+    const img = document.createElement('img');
+    img.src = src;
+    div.appendChild(img);
+    stage.appendChild(div);
+    return div;
+  }
+
+  function addVideoLayer(src) {
+    const div = document.createElement('div');
+    div.className = 'layer';
+    div.style.zIndex = '20';
+    const vid = document.createElement('video');
+    vid.src = src;
+    vid.style.cssText = 'width:100%;height:100%;display:block;object-fit:fill;';
+    vid.autoplay = true;
+    div.appendChild(vid);
+    stage.appendChild(div);
+    return vid;
+  }
+
+  function doFlash() {
+    flash.classList.remove('go');
+    void flash.offsetWidth;
+    flash.classList.add('go');
+  }
+
+  /* ─── 第一轮：三等奖 ─── */
+
+  function buildR1() {
+    clearStage();
+    addLayer(R1_BG);
+    LETTERS.forEach(function (l) {
+      addLayer(r1Letter(l), 'overlay', 'r1_' + l);
+    });
+  }
+
+  function setLitLetters(letters) {
+    const set = new Set(letters);
+    LETTERS.forEach(function (l) {
+      const el = document.getElementById('r1_' + l);
+      if (el) el.classList.toggle('lit', set.has(l));
+    });
+  }
+
+  function showR1Start() {
+    buildR1();
+    let idx = 0;
+    spinTimer = setInterval(function () {
+      setLitLetters([LETTERS[idx % 5]]);
+      idx++;
+    }, 150);
+  }
+
+  function showR1Pick(picks) { setLitLetters(picks); }
+
+  function showR1Complete(letters) {
+    if (spinTimer) { clearInterval(spinTimer); spinTimer = null; }
+    buildR1();
+    setLitLetters(letters);
+  }
+
+  /* ─── 第二轮：二等奖 ─── */
+
+  function buildR2() {
+    clearStage();
+    addLayer(R2_BG);
+    ALL_NUMS.forEach(function (n) {
+      addLayer(r2Num(n), 'overlay', 'r2_' + n);
+    });
+  }
+
+  function setLitNums(numbers) {
+    const set = new Set(numbers);
+    ALL_NUMS.forEach(function (n) {
+      const el = document.getElementById('r2_' + n);
+      if (el) el.classList.toggle('lit', set.has(n));
+    });
+  }
+
+  function showR2Start(winners, spinMs) {
+    buildR2();
+    const endAt = Date.now() + spinMs;
+    spinTimer = setInterval(function () {
+      // 每帧保持 12 个随机亮
+      setLitNums(randPick(ALL_NUMS, 12));
+      if (Date.now() >= endAt) {
+        clearInterval(spinTimer); spinTimer = null;
+        // 直接落定到最终 12 个中奖号码
+        setLitNums(winners);
+      }
+    }, 120);
+  }
+
+  function showR2Complete(numbers) {
+    buildR2();
+    setLitNums(numbers);
+  }
+
+  /* ─── 第三轮：一等奖（过场 + 按位置叠图） ─── */
+
+  async function runR3Reveal(tickets, withVideo) {
+    const myToken = ++animToken;
+
+    clearStage();
+
+    if (withVideo) {
+      /* Step 1：播放过场视频 */
+      const vid = addVideoLayer(R3_VID);
+      await new Promise(function (res) {
+        vid.onended = res;
+        vid.onerror = res;
+        setTimeout(res, 20000); // 超时保底
+      });
+      if (myToken !== animToken) return;
+    }
+
+    /* Step 2：白闪 */
+    doFlash();
+    await delay(420);
+    if (myToken !== animToken) return;
+
+    /* Step 3：显示背景 */
+    clearStage();
+    addLayer(R3_BG);
+    await delay(300);
+    if (myToken !== animToken) return;
+
+    /* Step 4：逐个先出数字 */
+    for (let i = 0; i < tickets.length; i++) {
+      if (myToken !== animToken) return;
+      const pos = i + 1;
+      const parsed = parseTicket(tickets[i]);
+      const letter = parsed[0], num = parsed[1];
+      if (!letter) continue;
+      const div = addLayer(r3Pos(pos, num), 'overlay fadein');
+      await delay(20);
+      div.classList.add('lit');
+      await delay(70);
+    }
+
+    await delay(600);
+    if (myToken !== animToken) return;
+
+    /* Step 5：逐个再出字母 */
+    for (let i = 0; i < tickets.length; i++) {
+      if (myToken !== animToken) return;
+      const pos = i + 1;
+      const parsed = parseTicket(tickets[i]);
+      const letter = parsed[0];
+      if (!letter) continue;
+      const div = addLayer(r3PosL(pos, letter), 'overlay fadein');
+      await delay(20);
+      div.classList.add('lit');
+      await delay(70);
+    }
+  }
+
+  /* ─── 特等奖 ─── */
+
+  async function showSpecial(ticket) {
+    const myToken = ++animToken;
+    const parsed = parseTicket(ticket);
+    const letter = parsed[0], num = parsed[1];
+
+    clearStage();
+    doFlash();
+    await delay(440);
+    if (myToken !== animToken) return;
+
+    addLayer(R3_BG);
+    await delay(350);
+    if (myToken !== animToken) return;
+
+    const nd = addLayer(presetNum(num), 'overlay fadein');
+    await delay(20); nd.classList.add('lit');
+    await delay(900);
+    if (myToken !== animToken) return;
+
+    const ld = addLayer(presetLetter(letter), 'overlay fadein');
+    await delay(20); ld.classList.add('lit');
+  }
+
+  /* ─── 补抽展示（全屏，带动画，点击关闭） ─── */
+
+  async function showSupplement(ticket) {
+    const myToken = ++animToken;
+    const parsed = parseTicket(ticket);
+    const letter = parsed[0], num = parsed[1];
+    if (!letter) return;
+
+    zoom.innerHTML = '';
+    zoom.classList.add('active');
+
+    const bgDiv = document.createElement('div');
+    bgDiv.className = 'layer';
+    const bgImg = document.createElement('img');
+    bgImg.src = R3_BG;
+    bgDiv.appendChild(bgImg);
+    zoom.appendChild(bgDiv);
+
+    doFlash();
+    await delay(440);
+    if (myToken !== animToken) return;
+
+    const nDiv = document.createElement('div');
+    nDiv.className = 'layer';
+    nDiv.style.cssText = 'mix-blend-mode:screen;opacity:0;transition:opacity 0.38s ease-in;';
+    const nImg = document.createElement('img');
+    nImg.src = presetNum(num);
+    nDiv.appendChild(nImg);
+    zoom.appendChild(nDiv);
+    await delay(20); nDiv.style.opacity = '1';
+    await delay(900);
+    if (myToken !== animToken) return;
+
+    const lDiv = document.createElement('div');
+    lDiv.className = 'layer';
+    lDiv.style.cssText = 'mix-blend-mode:screen;opacity:0;transition:opacity 0.38s ease-in;';
+    const lImg = document.createElement('img');
+    lImg.src = presetLetter(letter);
+    lDiv.appendChild(lImg);
+    zoom.appendChild(lDiv);
+    await delay(20); lDiv.style.opacity = '1';
+  }
+
+  /* ─── 全屏放大（一等奖点名） ─── */
+
+  function showFocus(ticket) {
+    const parsed = parseTicket(ticket);
+    const letter = parsed[0], num = parsed[1];
+    if (!letter) return;
+
+    zoom.innerHTML = '';
+    zoom.classList.add('active');
+
+    // 背景
+    const bgDiv = document.createElement('div');
+    bgDiv.className = 'layer';
+    const bgImg = document.createElement('img');
+    bgImg.src = R3_BG;
+    bgDiv.appendChild(bgImg);
+    zoom.appendChild(bgDiv);
+
+    // 数字叠图（预案文件夹，内容居中显眼）
+    const nDiv = document.createElement('div');
+    nDiv.className = 'layer';
+    nDiv.style.mixBlendMode = 'screen';
+    const nImg = document.createElement('img');
+    nImg.src = presetNum(num);
+    nDiv.appendChild(nImg);
+    zoom.appendChild(nDiv);
+
+    // 字母叠图
+    const lDiv = document.createElement('div');
+    lDiv.className = 'layer';
+    lDiv.style.mixBlendMode = 'screen';
+    const lImg = document.createElement('img');
+    lImg.src = presetLetter(letter);
+    lDiv.appendChild(lImg);
+    zoom.appendChild(lDiv);
+  }
+
+  zoom.addEventListener('click', function () {
+    zoom.classList.remove('active');
+    zoom.innerHTML = '';
+  });
+
+  /* ─── 纯背景预览（下一轮切换时调用，无特效） ─── */
+
+  const ROUND_BG = { 1: R1_BG, 2: R2_BG, 3: R3_BG, 4: R3_BG };
+
+  function showBg(round) {
+    ++animToken;
+    if (spinTimer) { clearInterval(spinTimer); spinTimer = null; }
+    clearStage();
+    const src = ROUND_BG[round] || R1_BG;
+    addLayer(src);
+  }
+
+  /* ─── 初始空闲态 ─── */
+
+  function showIdle() {
+    ++animToken;
+    buildR1();
+    setLitLetters([]);
+  }
+
+  /* ─── 状态恢复 ─── */
+
+  function applyState(saved) {
+    if (!saved) { showIdle(); return; }
+    if (saved.specialPrizeTicket) {
+      showSpecial(saved.specialPrizeTicket);
+    } else if (saved.firstPrizeTickets && saved.firstPrizeTickets.length === 32) {
+      runR3Reveal(saved.firstPrizeTickets.slice(0, 16), false);
+    } else if (saved.secondPrizeNumbers && saved.secondPrizeNumbers.length === 12) {
+      showR2Complete(saved.secondPrizeNumbers);
+    } else if (saved.thirdPrizeLetters && saved.thirdPrizeLetters.length > 0) {
+      showR1Complete(saved.thirdPrizeLetters);
+    } else {
+      showIdle();
+    }
+  }
+
+  /* ─── 消息派发 ─── */
+
+  function onMessage(data) {
+    switch (data.action) {
+      case 'reset':          showIdle(); break;
+      case 'bg:show':        showBg(data.round || 1); break;
+      case 'syncState':      applyState(data.state); break;
+      case 'third:start':    showR1Start(); break;
+      case 'third:pick':     showR1Pick(data.picks || []); break;
+      case 'third:complete': showR1Complete(data.letters || []); break;
+      case 'second:start':   showR2Start(data.winners || [], data.spinDuration || 4000); break;
+      case 'second:complete':showR2Complete(data.numbers || []); break;
+      case 'first:start':    runR3Reveal((data.tickets || []).slice(0, 16), true); break;
+      case 'first:showPage': runR3Reveal(data.tickets || [], false); break;
+      case 'first:focus':      showFocus(data.ticket || ''); break;
+      case 'first:supplement': showSupplement(data.ticket || ''); break;
+      case 'special:show':     showSpecial(data.ticket || ''); break;
+    }
+  }
+
+  window.addEventListener('message', function (e) {
+    if (e.data && e.data.type === 'student_lottery') onMessage(e.data);
+  });
+
+  window.addEventListener('storage', function (e) {
+    // 动画指令（实时，优先）
+    if (e.key === CMD_KEY && e.newValue) {
+      try { onMessage(JSON.parse(e.newValue)); } catch (_) {}
+      return;
+    }
+    // 状态恢复（仅在没有正在进行的动画时才响应，避免覆盖过渡效果）
+    if (e.key === STORAGE_KEY && e.newValue && !spinTimer) {
+      try { applyState(JSON.parse(e.newValue)); } catch (_) {}
+    }
+  });
+
+  function notifyReady() {
+    if (window.opener && !window.opener.closed) {
+      window.opener.postMessage({ type: 'student_lottery_ready' }, '*');
+    }
+  }
+
+  window.addEventListener('load', function () {
+    showIdle();
+    notifyReady();
+  });
+})();
+</script>
+</body>
+</html>
