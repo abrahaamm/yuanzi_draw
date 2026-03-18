@@ -41,9 +41,8 @@
       object-fit: fill;
     }
 
-    /* 叠图层：黑色部分 screen 混合后透明 */
+    /* 叠图层：普通叠加（不使用混合模式） */
     .overlay {
-      mix-blend-mode: screen;
       opacity: 0;
     }
 
@@ -96,7 +95,7 @@
 <div id="flash"></div>
 <div id="zoom"></div>
 
-<script>
+  <script>
 (function () {
   'use strict';
 
@@ -156,6 +155,9 @@
   function clearStage() {
     if (spinTimer) { clearInterval(spinTimer); spinTimer = null; }
     stage.innerHTML = '';
+    // 切换内容时同步关闭全屏放大层
+    zoom.classList.remove('active');
+    zoom.innerHTML = '';
   }
 
   function addLayer(src, cls, id) {
@@ -170,7 +172,7 @@
   }
 
   function addVideoLayer(src) {
-    const div = document.createElement('div');
+        const div = document.createElement('div');
     div.className = 'layer';
     div.style.zIndex = '20';
     const vid = document.createElement('video');
@@ -215,7 +217,26 @@
     }, 150);
   }
 
-  function showR1Pick(picks) { setLitLetters(picks); }
+  // 每轮独立旋转：已定字母常亮，未定字母循环闪烁
+  function showR1SpinRound(picked) {
+    if (spinTimer) { clearInterval(spinTimer); spinTimer = null; }
+    buildR1();
+    setLitLetters(picked);
+    var remaining = LETTERS.filter(function (l) { return picked.indexOf(l) === -1; });
+    if (remaining.length === 0) return;
+    var idx = 0;
+    spinTimer = setInterval(function () {
+      var lit = picked.concat([remaining[idx % remaining.length]]);
+      setLitLetters(lit);
+      idx++;
+    }, 140);
+  }
+
+  // 停止旋转，亮起本轮抽中的所有字母
+  function showR1Pick(picks) {
+    if (spinTimer) { clearInterval(spinTimer); spinTimer = null; }
+    setLitLetters(picks);
+  }
 
   function showR1Complete(letters) {
     if (spinTimer) { clearInterval(spinTimer); spinTimer = null; }
@@ -297,6 +318,7 @@
       const letter = parsed[0], num = parsed[1];
       if (!letter) continue;
       const div = addLayer(r3Pos(pos, num), 'overlay fadein');
+      div.id = 'r3n_' + pos;
       await delay(20);
       div.classList.add('lit');
       await delay(70);
@@ -313,10 +335,16 @@
       const letter = parsed[0];
       if (!letter) continue;
       const div = addLayer(r3PosL(pos, letter), 'overlay fadein');
+      div.id = 'r3l_' + pos;
       await delay(20);
       div.classList.add('lit');
       await delay(70);
     }
+
+    /* Step 6：应用缺席变暗 */
+    tickets.forEach(function (t, i) {
+      if (absentSet.has(t)) applyAbsentStyle(i + 1, true);
+    });
   }
 
   /* ─── 特等奖 ─── */
@@ -429,6 +457,47 @@
     zoom.innerHTML = '';
   });
 
+  /* ─── 缺席标记：变暗对应位置的叠图 ─── */
+
+  function applyAbsentStyle(pos, absent) {
+    const opacity = absent ? '0.18' : '1';
+    const n = document.getElementById('r3n_' + pos);
+    const l = document.getElementById('r3l_' + pos);
+    if (n) n.style.opacity = opacity;
+    if (l) l.style.opacity = opacity;
+  }
+
+  function setAbsentOnScreen(ticket, absent) {
+    if (absent) absentSet.add(ticket);
+    else absentSet.delete(ticket);
+    const pos = currentPageTickets.indexOf(ticket);
+    if (pos !== -1) applyAbsentStyle(pos + 1, absent);
+  }
+
+  /* ─── 一等奖静态直出（切换屏/回看时用，无逐个动画） ─── */
+
+  function showR3Static(tickets) {
+    ++animToken;
+    if (spinTimer) { clearInterval(spinTimer); spinTimer = null; }
+    clearStage();
+    currentPageTickets = tickets;
+    addLayer(R3_BG);
+    for (var i = 0; i < tickets.length; i++) {
+      var pos = i + 1;
+      var p = parseTicket(tickets[i]);
+      if (!p[0]) continue;
+      var nd = addLayer(r3Pos(pos, p[1]), 'overlay');
+      nd.id = 'r3n_' + pos;
+      nd.classList.add('lit');
+      var ld = addLayer(r3PosL(pos, p[0]), 'overlay');
+      ld.id = 'r3l_' + pos;
+      ld.classList.add('lit');
+    }
+    tickets.forEach(function (t, i) {
+      if (absentSet.has(t)) applyAbsentStyle(i + 1, true);
+    });
+  }
+
   /* ─── 纯背景预览（下一轮切换时调用，无特效） ─── */
 
   const ROUND_BG = { 1: R1_BG, 2: R2_BG, 3: R3_BG, 4: R3_BG };
@@ -451,12 +520,26 @@
 
   /* ─── 状态恢复 ─── */
 
+  /* 特等奖静态恢复（不走动画） */
+  function showSpecialStatic(ticket) {
+    ++animToken;
+    if (spinTimer) { clearInterval(spinTimer); spinTimer = null; }
+    var parsed = parseTicket(ticket);
+    var letter = parsed[0], num = parsed[1];
+    if (!letter) return;
+    clearStage();
+    addLayer(R3_BG);
+    var nd = addLayer(presetNum(num), 'overlay'); nd.classList.add('lit');
+    var ld = addLayer(presetLetter(letter), 'overlay'); ld.classList.add('lit');
+  }
+
   function applyState(saved) {
     if (!saved) { showIdle(); return; }
     if (saved.specialPrizeTicket) {
-      showSpecial(saved.specialPrizeTicket);
+      showSpecialStatic(saved.specialPrizeTicket);
     } else if (saved.firstPrizeTickets && saved.firstPrizeTickets.length === 32) {
-      runR3Reveal(saved.firstPrizeTickets.slice(0, 16), false);
+      absentSet = new Set(Array.isArray(saved.firstPrizeAbsent) ? saved.firstPrizeAbsent : []);
+      showR3Static(saved.firstPrizeTickets.slice(0, 16));
     } else if (saved.secondPrizeNumbers && saved.secondPrizeNumbers.length === 12) {
       showR2Complete(saved.secondPrizeNumbers);
     } else if (saved.thirdPrizeLetters && saved.thirdPrizeLetters.length > 0) {
@@ -473,24 +556,39 @@
       case 'reset':          showIdle(); break;
       case 'bg:show':        showBg(data.round || 1); break;
       case 'syncState':      applyState(data.state); break;
-      case 'third:start':    showR1Start(); break;
-      case 'third:pick':     showR1Pick(data.picks || []); break;
-      case 'third:complete': showR1Complete(data.letters || []); break;
+      case 'third:start':     showR1Start(); break;
+      case 'third:spinRound': showR1SpinRound(data.picked || []); break;
+      case 'third:pick':      showR1Pick(data.picks || []); break;
+      case 'third:complete':  showR1Complete(data.letters || []); break;
       case 'second:start':   showR2Start(data.winners || [], data.spinDuration || 4000); break;
       case 'second:complete':showR2Complete(data.numbers || []); break;
-      case 'first:start':    runR3Reveal((data.tickets || []).slice(0, 16), true); break;
-      case 'first:showPage': runR3Reveal(data.tickets || [], false); break;
+      case 'first:start':
+        currentPageTickets = (data.tickets || []).slice(0, 16);
+        absentSet = new Set(data.absent || []);
+        runR3Reveal(currentPageTickets, true);
+        break;
+      case 'first:showPage':
+        absentSet = new Set(data.absent || []);
+        if (data.animate) {
+          currentPageTickets = data.tickets || [];
+          runR3Reveal(currentPageTickets, false); // 无视频，但保留逐个亮起动画
+        } else {
+          showR3Static(data.tickets || []);
+        }
+        break;
+      case 'first:setAbsent':  setAbsentOnScreen(data.ticket || '', !!data.absent); break;
       case 'first:focus':      showFocus(data.ticket || ''); break;
       case 'first:supplement': showSupplement(data.ticket || ''); break;
       case 'special:show':     showSpecial(data.ticket || ''); break;
+      case 'special:static':   showSpecialStatic(data.ticket || ''); break;
     }
   }
 
   window.addEventListener('message', function (e) {
     if (e.data && e.data.type === 'student_lottery') onMessage(e.data);
-  });
+    });
 
-  window.addEventListener('storage', function (e) {
+    window.addEventListener('storage', function (e) {
     // 动画指令（实时，优先）
     if (e.key === CMD_KEY && e.newValue) {
       try { onMessage(JSON.parse(e.newValue)); } catch (_) {}
@@ -500,9 +598,9 @@
     if (e.key === STORAGE_KEY && e.newValue && !spinTimer) {
       try { applyState(JSON.parse(e.newValue)); } catch (_) {}
     }
-  });
+    });
 
-  function notifyReady() {
+    function notifyReady() {
     if (window.opener && !window.opener.closed) {
       window.opener.postMessage({ type: 'student_lottery_ready' }, '*');
     }
@@ -513,6 +611,6 @@
     notifyReady();
   });
 })();
-</script>
+  </script>
 </body>
 </html>

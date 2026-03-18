@@ -161,6 +161,17 @@ body {
   transform: translateY(-1px);
 }
 
+.ticket-badge.absent {
+  background: linear-gradient(135deg, #7a1f1f, #5c1414);
+  color: #ff9a9a;
+  text-decoration: line-through;
+  border: 1.5px solid #a83232;
+}
+
+.ticket-badge.absent:hover {
+  background: linear-gradient(135deg, #962626, #721a1a);
+}
+
 .sub-actions {
   display: flex;
   gap: 10px;
@@ -193,6 +204,13 @@ body {
 .focus-ticket:hover {
   border-color: var(--accent);
   color: #ffffff;
+}
+
+.focus-ticket.absent {
+  border-color: #a83232;
+  color: #ff8080;
+  text-decoration: line-through;
+  background: rgba(120, 20, 20, 0.25);
 }
 
 .result-special {

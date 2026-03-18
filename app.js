@@ -25,7 +25,8 @@
     firstPrizeTickets: [],
     firstPrizeSupplement: [],
     firstPrizeAbsent: [],
-    specialPrizeTicket: null
+    specialPrizeTicket: null,
+    specialPrizeSupplement: []
   };
 
   const els = {
@@ -52,11 +53,16 @@
     supplementPanel: document.getElementById('supplementPanel'),
     supplementPoolCount: document.getElementById('supplementPoolCount'),
     btnSupplement: document.getElementById('btnSupplement'),
-    supplementHistory: document.getElementById('supplementHistory')
+    supplementHistory: document.getElementById('supplementHistory'),
+    specialSupplementPanel: document.getElementById('specialSupplementPanel'),
+    specialSupplementPoolCount: document.getElementById('specialSupplementPoolCount'),
+    btnSpecialSupplement: document.getElementById('btnSpecialSupplement'),
+    specialSupplementHistory: document.getElementById('specialSupplementHistory')
   };
 
   let screenWindow = null;
   let currentDisplayPage = 1;
+  let firstPrizeAnimatedPages = new Set(); // 记录已播放过动画的屏（避免重复播）
 
   function shuffle(arr) {
     const a = [...arr];
@@ -101,10 +107,21 @@
   }
 
   function toggleButtons(isDrawing) {
-    els.draw1.disabled = isDrawing || state.thirdPrizeLetters.length > 0;
+    els.draw1.disabled = isDrawing || state.thirdPrizeLetters.length >= THIRD_PRIZE_COUNT;
     els.draw2.disabled = isDrawing || state.secondPrizeNumbers.length > 0;
     els.draw3.disabled = isDrawing || state.firstPrizeTickets.length > 0;
     els.draw4.disabled = isDrawing || !!state.specialPrizeTicket;
+  }
+
+  function updateThirdPrizeButton() {
+    const done = state.thirdPrizeLetters.length;
+    if (done >= THIRD_PRIZE_COUNT) {
+      els.draw1.textContent = '三等奖已完成';
+      els.draw1.disabled = true;
+    } else {
+      els.draw1.textContent = `抽第 ${done + 1} 个字母（共 ${THIRD_PRIZE_COUNT} 个）`;
+      els.draw1.disabled = false;
+    }
   }
 
   function renderThirdPrize() {
@@ -170,26 +187,35 @@
   }
 
   async function drawThirdPrize() {
-    if (state.thirdPrizeLetters.length > 0) return;
+    const alreadyDone = state.thirdPrizeLetters.length;
+    if (alreadyDone >= THIRD_PRIZE_COUNT) return;
+
     toggleButtons(true);
-    els.round1Result.innerHTML = '';
 
-    const pool = shuffle(LETTERS);
-    const picks = [];
-    postToScreen({ action: 'third:start' });
+    const picked = [...state.thirdPrizeLetters];
+    const remaining = shuffle(LETTERS.filter((l) => !picked.includes(l)));
+    const newLetter = remaining[0];
+    const round = alreadyDone + 1;
 
-    for (let i = 0; i < THIRD_PRIZE_COUNT; i++) {
-      await delay(randomInt(1600, 2400));
-      picks.push(pool[i]);
-      postToScreen({ action: 'third:pick', letter: pool[i], picks: [...picks] });
-      els.round1Result.innerHTML = picks
-        .map((letter) => `<span class="result-letter-badge">${letter}</span>`)
-        .join('');
+    // 本轮旋转：已定字母常亮，剩余字母循环闪烁
+    postToScreen({ action: 'third:spinRound', round, picked });
+    await delay(randomInt(2200, 3200));
+
+    const newPicks = [...picked, newLetter];
+    postToScreen({ action: 'third:pick', letter: newLetter, picks: newPicks });
+    state.thirdPrizeLetters = newPicks;
+    els.round1Result.innerHTML = newPicks
+      .map((l) => `<span class="result-letter-badge">${l}</span>`)
+      .join('');
+
+    if (newPicks.length >= THIRD_PRIZE_COUNT) {
+      persist();
+      postToScreen({ action: 'third:complete', letters: newPicks });
+    } else {
+      persist();
     }
 
-    state.thirdPrizeLetters = picks;
-    persist();
-    postToScreen({ action: 'third:complete', letters: picks });
+    updateThirdPrizeButton();
     toggleButtons(false);
   }
 
@@ -290,6 +316,7 @@
 
     const winners = shuffle(pool).slice(0, FIRST_PRIZE_COUNT);
     state.firstPrizeTickets = winners;
+    firstPrizeAnimatedPages = new Set([1]); // first:start 会播放第 1 屏动画
     renderFirstPrize(1);
     renderFocusPanel();
     updateScreenSwitchPanel(1);
@@ -297,8 +324,7 @@
     persist();
 
     postToScreen({ action: 'first:start', tickets: winners });
-    await delay(5200);
-    postToScreen({ action: 'first:showPage', page: 1, tickets: winners.slice(0, 16), absent: state.firstPrizeAbsent });
+    await delay(3000);
     toggleButtons(false);
   }
 
@@ -326,19 +352,71 @@
     renderSpecialPrize();
     persist();
     postToScreen({ action: 'special:show', ticket: winner });
+    updateSpecialSupplementPanel();
     toggleButtons(false);
+  }
+
+  function buildSpecialSupplementPool() {
+    const blockedNums = new Set(state.secondPrizeNumbers);
+    const excludedTickets = new Set([
+      ...state.firstPrizeTickets,
+      ...state.firstPrizeSupplement,
+      state.specialPrizeTicket,
+      ...state.specialPrizeSupplement
+    ].filter(Boolean));
+    const tickets = [];
+    for (const letter of LETTERS) {
+      for (const num of NUMBERS) {
+        const ticket = `${letter}${num}`;
+        if (blockedNums.has(num)) continue;
+        if (excludedTickets.has(ticket)) continue;
+        tickets.push(ticket);
+      }
+    }
+    return tickets;
+  }
+
+  function updateSpecialSupplementPanel() {
+    if (!state.specialPrizeTicket) {
+      els.specialSupplementPanel.style.display = 'none';
+      return;
+    }
+    els.specialSupplementPanel.style.display = '';
+    const pool = buildSpecialSupplementPool();
+    els.specialSupplementPoolCount.textContent = `剩余可抽：${pool.length} 张`;
+    els.btnSpecialSupplement.disabled = pool.length === 0;
+    els.specialSupplementHistory.innerHTML = state.specialPrizeSupplement.length === 0
+      ? '<span class="supplement-empty">暂无补抽记录</span>'
+      : state.specialPrizeSupplement.map((t, i) =>
+          `<span class="supplement-badge" title="第 ${i + 1} 次补抽">${t}</span>`
+        ).join('');
+  }
+
+  function drawSpecialSupplement() {
+    const pool = buildSpecialSupplementPool();
+    if (pool.length === 0) {
+      alert('特等奖补抽票池已用尽。');
+      return;
+    }
+    const ticket = pool[Math.floor(Math.random() * pool.length)];
+    state.specialPrizeSupplement.push(ticket);
+    persist();
+    updateSpecialSupplementPanel();
+    postToScreen({ action: 'special:show', ticket });
   }
 
   function renderFromState() {
     renderThirdPrize();
     renderSecondPrize();
     renderSpecialPrize();
+    updateThirdPrizeButton();
     updateScreenSwitchPanel();
     if (state.firstPrizeTickets.length > 0) {
       renderFirstPrize(1);
       renderFocusPanel();
     }
     updateSupplementPanel();
+    updateSpecialSupplementPanel();
   }
 
   function reset() {
@@ -349,7 +427,9 @@
     state.firstPrizeSupplement = [];
     state.firstPrizeAbsent = [];
     state.specialPrizeTicket = null;
+    state.specialPrizeSupplement = [];
     currentDisplayPage = 1;
+    firstPrizeAnimatedPages = new Set();
     persist();
     els.round1Result.innerHTML = '';
     els.round2Grid.innerHTML = '';
@@ -358,8 +438,10 @@
     els.focusTickets.innerHTML = '';
     renderSecondPrize();
     setRound(1);
+    updateThirdPrizeButton();
     updateScreenSwitchPanel();
     updateSupplementPanel();
+    updateSpecialSupplementPanel();
     postToScreen({ action: 'reset' });
     toggleButtons(false);
   }
@@ -377,6 +459,7 @@
       state.firstPrizeSupplement = Array.isArray(saved.firstPrizeSupplement) ? saved.firstPrizeSupplement : [];
       state.firstPrizeAbsent = Array.isArray(saved.firstPrizeAbsent) ? saved.firstPrizeAbsent : [];
       state.specialPrizeTicket = saved.specialPrizeTicket || null;
+      state.specialPrizeSupplement = Array.isArray(saved.specialPrizeSupplement) ? saved.specialPrizeSupplement : [];
     } catch (_) {
       // Ignore malformed cache and start fresh.
     }
@@ -430,7 +513,7 @@
         break;
       case 4:
         if (state.specialPrizeTicket)
-          postToScreen({ action: 'special:show', ticket: state.specialPrizeTicket });
+          postToScreen({ action: 'special:static', ticket: state.specialPrizeTicket });
         else
           postToScreen({ action: 'bg:show', round: 4 });
         break;
@@ -453,7 +536,7 @@
       if (state.currentRound < 4) {
         const next = state.currentRound + 1;
         setRound(next);
-        postToScreen({ action: 'bg:show', round: next });
+        restoreRoundOnScreen(next);
       }
     });
     document.getElementById('btnReset').addEventListener('click', reset);
@@ -469,18 +552,23 @@
       if (state.firstPrizeTickets.length !== FIRST_PRIZE_COUNT) return;
       renderFirstPrize(1);
       updateScreenSwitchPanel(1);
-      postToScreen({ action: 'first:showPage', page: 1, tickets: state.firstPrizeTickets.slice(0, 16), absent: state.firstPrizeAbsent });
+      const animate = !firstPrizeAnimatedPages.has(1);
+      firstPrizeAnimatedPages.add(1);
+      postToScreen({ action: 'first:showPage', page: 1, tickets: state.firstPrizeTickets.slice(0, 16), absent: state.firstPrizeAbsent, animate });
     });
     els.showPage2.addEventListener('click', function () {
       if (state.firstPrizeTickets.length !== FIRST_PRIZE_COUNT) return;
       renderFirstPrize(2);
       updateScreenSwitchPanel(2);
-      postToScreen({ action: 'first:showPage', page: 2, tickets: state.firstPrizeTickets.slice(16), absent: state.firstPrizeAbsent });
+      const animate = !firstPrizeAnimatedPages.has(2);
+      firstPrizeAnimatedPages.add(2);
+      postToScreen({ action: 'first:showPage', page: 2, tickets: state.firstPrizeTickets.slice(16), absent: state.firstPrizeAbsent, animate });
     });
 
     els.focusTickets.addEventListener('click', handleFocusClick);
     els.round3Result.addEventListener('click', handleAbsentClick);
     els.btnSupplement.addEventListener('click', drawSupplementSingle);
+    els.btnSpecialSupplement.addEventListener('click', drawSpecialSupplement);
 
     window.addEventListener('message', function (e) {
       if (!(e.data && e.data.type === 'student_lottery_ready')) return;
