@@ -177,6 +177,18 @@ body {
   gap: 10px;
   margin-top: 10px;
   margin-bottom: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.sub-actions .btn {
+  min-width: 128px;
+}
+
+.sub-actions .btn-primary {
+  width: auto;
+  max-width: none;
+  margin: 0;
 }
 
 .focus-panel {

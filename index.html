@@ -25,7 +25,10 @@
         <h2 class="section-title">三等奖 · POWER 字母抽 3 次</h2>
         <p class="section-desc">每次抽 1 个字母，共 3 个中奖字母（去重）</p>
         <div class="result-area result-letters" id="round1Result"></div>
-        <button class="btn btn-primary" id="drawRound1">抽取三等奖</button>
+        <div class="sub-actions">
+          <button class="btn btn-primary" id="startRound1">开始滚动</button>
+          <button class="btn btn-secondary" id="stopRound1">手动停止</button>
+        </div>
       </section>
 
       <!-- 第二轮：二等奖 -->
@@ -33,7 +36,10 @@
         <h2 class="section-title">二等奖 · 号码池 1-48 抽 12 个</h2>
         <p class="section-desc">动画每帧保持 9 个亮灯，最终确定 12 个中奖号码</p>
         <div class="grid-4x3" id="round2Grid"></div>
-        <button class="btn btn-primary" id="drawRound2">抽取二等奖</button>
+        <div class="sub-actions">
+          <button class="btn btn-primary" id="startRound2">开始滚动</button>
+          <button class="btn btn-secondary" id="stopRound2">手动停止</button>
+        </div>
       </section>
 
       <!-- 第三轮：一等奖 -->
@@ -73,7 +79,11 @@
         <h2 class="section-title">特等奖 · 抽 1 组 字母+号码</h2>
         <p class="section-desc">按预案抽取 1 名特等奖</p>
         <div class="result-area result-special" id="round4Result"></div>
-        <button class="btn btn-primary" id="drawRound4">抽取特等奖</button>
+        <div class="sub-actions">
+          <button class="btn btn-primary" id="startRound4">开始滚动</button>
+          <button class="btn btn-secondary" id="stopLetterRound4">停字母</button>
+          <button class="btn btn-secondary" id="stopNumberRound4">停数字</button>
+        </div>
 
         <!-- 特等奖补抽区域 -->
         <div class="supplement-panel" id="specialSupplementPanel" style="display:none">

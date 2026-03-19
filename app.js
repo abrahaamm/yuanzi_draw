@@ -28,6 +28,12 @@
     specialPrizeTicket: null,
     specialPrizeSupplement: []
   };
+  let thirdRolling = false;
+  let secondRolling = false;
+  let specialRolling = false;
+  let specialLetterStopped = false;
+  let specialRollingLetter = null;
+  let specialRollingNumber = null;
 
   const els = {
     roundName: document.getElementById('roundName'),
@@ -42,10 +48,14 @@
     round3Result: document.getElementById('round3Result'),
     round4Result: document.getElementById('round4Result'),
     focusTickets: document.getElementById('focusTickets'),
-    draw1: document.getElementById('drawRound1'),
-    draw2: document.getElementById('drawRound2'),
+    start1: document.getElementById('startRound1'),
+    stop1: document.getElementById('stopRound1'),
+    start2: document.getElementById('startRound2'),
+    stop2: document.getElementById('stopRound2'),
     draw3: document.getElementById('drawRound3'),
-    draw4: document.getElementById('drawRound4'),
+    start4: document.getElementById('startRound4'),
+    stop4Letter: document.getElementById('stopLetterRound4'),
+    stop4Number: document.getElementById('stopNumberRound4'),
     screenSwitchPanel: document.getElementById('screenSwitchPanel'),
     screenCurrent: document.getElementById('screenCurrent'),
     showPage1: document.getElementById('btnShowPage1'),
@@ -106,22 +116,50 @@
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  function toggleButtons(isDrawing) {
-    els.draw1.disabled = isDrawing || state.thirdPrizeLetters.length >= THIRD_PRIZE_COUNT;
-    els.draw2.disabled = isDrawing || state.secondPrizeNumbers.length > 0;
-    els.draw3.disabled = isDrawing || state.firstPrizeTickets.length > 0;
-    els.draw4.disabled = isDrawing || !!state.specialPrizeTicket;
+  function updateThirdPrizeButtons(globalLock) {
+    const done = state.thirdPrizeLetters.length >= THIRD_PRIZE_COUNT;
+    els.start1.disabled = !!globalLock || done || thirdRolling;
+    els.stop1.disabled = !!globalLock || done || !thirdRolling;
+    if (done) {
+      els.start1.textContent = '三等奖已完成';
+    } else if (thirdRolling) {
+      els.start1.textContent = '滚动中...';
+    } else {
+      const step = state.thirdPrizeLetters.length + 1;
+      els.start1.textContent = `开始第 ${step} 抽`;
+    }
   }
 
-  function updateThirdPrizeButton() {
-    const done = state.thirdPrizeLetters.length;
-    if (done >= THIRD_PRIZE_COUNT) {
-      els.draw1.textContent = '三等奖已完成';
-      els.draw1.disabled = true;
+  function updateSecondPrizeButtons(globalLock) {
+    const done = state.secondPrizeNumbers.length > 0;
+    els.start2.disabled = !!globalLock || done || secondRolling;
+    els.stop2.disabled = !!globalLock || done || !secondRolling;
+    if (done) {
+      els.start2.textContent = '二等奖已完成';
     } else {
-      els.draw1.textContent = `抽第 ${done + 1} 个字母（共 ${THIRD_PRIZE_COUNT} 个）`;
-      els.draw1.disabled = false;
+      els.start2.textContent = secondRolling ? '滚动中...' : '开始滚动';
     }
+  }
+
+  function updateSpecialPrizeButtons(globalLock) {
+    const done = !!state.specialPrizeTicket;
+    els.start4.disabled = !!globalLock || done || specialRolling;
+    els.stop4Letter.disabled = !!globalLock || done || !specialRolling || specialLetterStopped;
+    els.stop4Number.disabled = !!globalLock || done || !specialRolling || !specialLetterStopped;
+    if (done) {
+      els.start4.textContent = '特等奖已完成';
+    } else if (specialRolling) {
+      els.start4.textContent = '滚动中...';
+    } else {
+      els.start4.textContent = '开始滚动';
+    }
+  }
+
+  function updateControlButtons(globalLock) {
+    els.draw3.disabled = !!globalLock || state.firstPrizeTickets.length > 0;
+    updateThirdPrizeButtons(globalLock);
+    updateSecondPrizeButtons(globalLock);
+    updateSpecialPrizeButtons(globalLock);
   }
 
   function renderThirdPrize() {
@@ -186,59 +224,54 @@
     els.showPage2.classList.toggle('active', currentDisplayPage === 2);
   }
 
-  async function drawThirdPrize() {
-    const alreadyDone = state.thirdPrizeLetters.length;
-    if (alreadyDone >= THIRD_PRIZE_COUNT) return;
-
-    toggleButtons(true);
-
-    const picked = [...state.thirdPrizeLetters];
-    const remaining = shuffle(LETTERS.filter((l) => !picked.includes(l)));
-    const newLetter = remaining[0];
-    const round = alreadyDone + 1;
-
-    // 本轮旋转：已定字母常亮，剩余字母循环闪烁
-    postToScreen({ action: 'third:spinRound', round, picked });
-    await delay(randomInt(2200, 3200));
-
-    const newPicks = [...picked, newLetter];
-    postToScreen({ action: 'third:pick', letter: newLetter, picks: newPicks });
-    state.thirdPrizeLetters = newPicks;
-    els.round1Result.innerHTML = newPicks
-      .map((l) => `<span class="result-letter-badge">${l}</span>`)
-      .join('');
-
-    if (newPicks.length >= THIRD_PRIZE_COUNT) {
-      persist();
-      postToScreen({ action: 'third:complete', letters: newPicks });
-    } else {
-      persist();
-    }
-
-    updateThirdPrizeButton();
-    toggleButtons(false);
+  function startThirdPrizeRolling() {
+    if (thirdRolling || state.thirdPrizeLetters.length >= THIRD_PRIZE_COUNT) return;
+    thirdRolling = true;
+    const round = state.thirdPrizeLetters.length + 1;
+    postToScreen({ action: 'third:spinRound', round, picked: [...state.thirdPrizeLetters] });
+    updateControlButtons(false);
   }
 
-  async function drawSecondPrize() {
-    if (state.secondPrizeNumbers.length > 0) return;
-    toggleButtons(true);
+  function stopThirdPrizeRolling() {
+    if (!thirdRolling) return;
+    const picked = [...state.thirdPrizeLetters];
+    const remaining = LETTERS.filter((l) => !picked.includes(l));
+    if (remaining.length === 0) {
+      thirdRolling = false;
+      updateControlButtons(false);
+      return;
+    }
+    const letter = remaining[Math.floor(Math.random() * remaining.length)];
+    const newPicks = [...picked, letter];
+    thirdRolling = false;
+    state.thirdPrizeLetters = newPicks;
+    renderThirdPrize();
+    persist();
+    postToScreen({ action: 'third:pick', letter, picks: newPicks });
+    if (newPicks.length >= THIRD_PRIZE_COUNT) {
+      postToScreen({ action: 'third:complete', letters: newPicks });
+    }
+    updateControlButtons(false);
+  }
+
+  function startSecondPrizeRolling() {
+    if (secondRolling || state.secondPrizeNumbers.length > 0) return;
+    secondRolling = true;
     els.round2Grid.innerHTML = '';
+    renderSecondPrize();
+    postToScreen({ action: 'second:startManual' });
+    updateControlButtons(false);
+  }
 
+  function stopSecondPrizeRolling() {
+    if (!secondRolling) return;
+    secondRolling = false;
     const winners = shuffle(NUMBERS).slice(0, SECOND_PRIZE_COUNT).sort((a, b) => a - b);
-    const spinDuration = randomInt(3600, 5600);
-
-    postToScreen({
-      action: 'second:start',
-      spinDuration,
-      winners
-    });
-
-    await delay(spinDuration + 1200);
     state.secondPrizeNumbers = winners;
     renderSecondPrize();
     persist();
     postToScreen({ action: 'second:complete', numbers: winners });
-    toggleButtons(false);
+    updateControlButtons(false);
   }
 
   function buildFirstPrizePool() {
@@ -306,11 +339,11 @@
       return;
     }
 
-    toggleButtons(true);
+    updateControlButtons(true);
     const pool = buildFirstPrizePool();
     if (pool.length < FIRST_PRIZE_COUNT) {
       alert('一等奖可抽奖池不足。');
-      toggleButtons(false);
+      updateControlButtons(false);
       return;
     }
 
@@ -325,35 +358,83 @@
 
     postToScreen({ action: 'first:start', tickets: winners });
     await delay(3000);
-    toggleButtons(false);
+    updateControlButtons(false);
   }
 
-  function drawSpecialPrize() {
-    if (state.specialPrizeTicket) return;
-    const secondExcluded = new Set(state.secondPrizeNumbers);
-    const firstExcluded = new Set(state.firstPrizeTickets);
-    const pool = [];
+  function getSpecialAvailableMap() {
+    const blockedNums = new Set(state.secondPrizeNumbers);
+    const excludedTickets = new Set([
+      ...state.firstPrizeTickets,
+      ...state.firstPrizeSupplement,
+      state.specialPrizeTicket,
+      ...state.specialPrizeSupplement
+    ].filter(Boolean));
+    const map = {};
     for (const letter of LETTERS) {
+      map[letter] = [];
       for (const num of NUMBERS) {
         const ticket = `${letter}${num}`;
-        if (secondExcluded.has(num)) continue;
-        if (firstExcluded.has(ticket)) continue;
-        pool.push(ticket);
+        if (blockedNums.has(num)) continue;
+        if (excludedTickets.has(ticket)) continue;
+        map[letter].push(num);
       }
     }
+    return map;
+  }
 
-    if (pool.length === 0) {
+  function startSpecialRolling() {
+    if (state.specialPrizeTicket || specialRolling) return;
+    const map = getSpecialAvailableMap();
+    const letters = LETTERS.filter((l) => map[l].length > 0);
+    if (letters.length === 0) {
       alert('特等奖可抽奖池为空。');
       return;
     }
+    specialRolling = true;
+    specialLetterStopped = false;
+    specialRollingLetter = null;
+    specialRollingNumber = null;
+    postToScreen({ action: 'special:start' });
+    updateControlButtons(false);
+  }
 
-    const winner = pool[Math.floor(Math.random() * pool.length)];
-    state.specialPrizeTicket = winner;
+  function stopSpecialLetter() {
+    if (!specialRolling || specialLetterStopped) return;
+    const map = getSpecialAvailableMap();
+    const letters = LETTERS.filter((l) => map[l].length > 0);
+    if (letters.length === 0) {
+      alert('特等奖可抽奖池为空。');
+      return;
+    }
+    specialRollingLetter = letters[Math.floor(Math.random() * letters.length)];
+    specialLetterStopped = true;
+    postToScreen({ action: 'special:stopLetter', letter: specialRollingLetter });
+    updateControlButtons(false);
+  }
+
+  function stopSpecialNumber() {
+    if (!specialRolling || !specialLetterStopped || !specialRollingLetter) return;
+    const map = getSpecialAvailableMap();
+    const nums = map[specialRollingLetter] || [];
+    if (nums.length === 0) {
+      alert('当前字母已无可用号码，请重新开始特等奖。');
+      specialRolling = false;
+      specialLetterStopped = false;
+      specialRollingLetter = null;
+      postToScreen({ action: 'special:cancel' });
+      updateControlButtons(false);
+      return;
+    }
+    specialRollingNumber = nums[Math.floor(Math.random() * nums.length)];
+    const ticket = `${specialRollingLetter}${specialRollingNumber}`;
+    specialRolling = false;
+    specialLetterStopped = false;
+    state.specialPrizeTicket = ticket;
     renderSpecialPrize();
     persist();
-    postToScreen({ action: 'special:show', ticket: winner });
+    postToScreen({ action: 'special:stopNumber', number: specialRollingNumber, ticket });
     updateSpecialSupplementPanel();
-    toggleButtons(false);
+    updateControlButtons(false);
   }
 
   function buildSpecialSupplementPool() {
@@ -409,7 +490,12 @@
     renderThirdPrize();
     renderSecondPrize();
     renderSpecialPrize();
-    updateThirdPrizeButton();
+    thirdRolling = false;
+    secondRolling = false;
+    specialRolling = false;
+    specialLetterStopped = false;
+    specialRollingLetter = null;
+    specialRollingNumber = null;
     updateScreenSwitchPanel();
     if (state.firstPrizeTickets.length > 0) {
       renderFirstPrize(1);
@@ -417,6 +503,7 @@
     }
     updateSupplementPanel();
     updateSpecialSupplementPanel();
+    updateControlButtons(false);
   }
 
   function reset() {
@@ -430,6 +517,12 @@
     state.specialPrizeSupplement = [];
     currentDisplayPage = 1;
     firstPrizeAnimatedPages = new Set();
+    thirdRolling = false;
+    secondRolling = false;
+    specialRolling = false;
+    specialLetterStopped = false;
+    specialRollingLetter = null;
+    specialRollingNumber = null;
     persist();
     els.round1Result.innerHTML = '';
     els.round2Grid.innerHTML = '';
@@ -438,12 +531,11 @@
     els.focusTickets.innerHTML = '';
     renderSecondPrize();
     setRound(1);
-    updateThirdPrizeButton();
     updateScreenSwitchPanel();
     updateSupplementPanel();
     updateSpecialSupplementPanel();
     postToScreen({ action: 'reset' });
-    toggleButtons(false);
+    updateControlButtons(false);
   }
 
   function restoreFromStorage() {
@@ -521,10 +613,14 @@
   }
 
   function bindEvents() {
-    document.getElementById('drawRound1').addEventListener('click', drawThirdPrize);
-    document.getElementById('drawRound2').addEventListener('click', drawSecondPrize);
+    document.getElementById('startRound1').addEventListener('click', startThirdPrizeRolling);
+    document.getElementById('stopRound1').addEventListener('click', stopThirdPrizeRolling);
+    document.getElementById('startRound2').addEventListener('click', startSecondPrizeRolling);
+    document.getElementById('stopRound2').addEventListener('click', stopSecondPrizeRolling);
     document.getElementById('drawRound3').addEventListener('click', drawFirstPrize);
-    document.getElementById('drawRound4').addEventListener('click', drawSpecialPrize);
+    document.getElementById('startRound4').addEventListener('click', startSpecialRolling);
+    document.getElementById('stopLetterRound4').addEventListener('click', stopSpecialLetter);
+    document.getElementById('stopNumberRound4').addEventListener('click', stopSpecialNumber);
     document.getElementById('btnPrevRound').addEventListener('click', function () {
       if (state.currentRound > 1) {
         const prev = state.currentRound - 1;
@@ -583,7 +679,7 @@
     setRound(state.currentRound);
     bindEvents();
     persist();
-    toggleButtons(false);
+    updateControlButtons(false);
   }
 
   init();

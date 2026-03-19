@@ -128,6 +128,9 @@
   let animToken  = 0;
   let currentPageTickets = [];   // 当前大屏展示的 16 张票
   let absentSet  = new Set();    // 已标记缺席的票号
+  let specialLetterTimer = null;
+  let specialNumberTimer = null;
+  let specialLockedLetter = null;
 
   /* ─── 工具 ─── */
   function pad2(n) { return String(n).padStart(2, '0'); }
@@ -154,6 +157,9 @@
   /* ─── 舞台元素操作 ─── */
   function clearStage() {
     if (spinTimer) { clearInterval(spinTimer); spinTimer = null; }
+    if (specialLetterTimer) { clearInterval(specialLetterTimer); specialLetterTimer = null; }
+    if (specialNumberTimer) { clearInterval(specialNumberTimer); specialNumberTimer = null; }
+    specialLockedLetter = null;
     stage.innerHTML = '';
     // 切换内容时同步关闭全屏放大层
     zoom.classList.remove('active');
@@ -262,17 +268,11 @@
     });
   }
 
-  function showR2Start(winners, spinMs) {
+  function showR2StartManual() {
     buildR2();
-    const endAt = Date.now() + spinMs;
     spinTimer = setInterval(function () {
       // 每帧保持 12 个随机亮
       setLitNums(randPick(ALL_NUMS, 12));
-      if (Date.now() >= endAt) {
-        clearInterval(spinTimer); spinTimer = null;
-        // 直接落定到最终 12 个中奖号码
-        setLitNums(winners);
-      }
     }, 120);
   }
 
@@ -370,6 +370,58 @@
 
     const ld = addLayer(presetLetter(letter), 'overlay fadein');
     await delay(20); ld.classList.add('lit');
+  }
+
+  function startSpecialRolling() {
+    clearStage();
+    addLayer(R3_BG);
+
+    const numLayer = addLayer(presetNum(1), 'overlay');
+    const letterLayer = addLayer(presetLetter('P'), 'overlay');
+    numLayer.classList.add('lit');
+    letterLayer.classList.add('lit');
+
+    const numImg = numLayer.querySelector('img');
+    const letterImg = letterLayer.querySelector('img');
+
+    specialLockedLetter = null;
+    specialLetterTimer = setInterval(function () {
+      const l = LETTERS[Math.floor(Math.random() * LETTERS.length)];
+      letterImg.src = presetLetter(l);
+    }, 120);
+    specialNumberTimer = setInterval(function () {
+      const n = ALL_NUMS[Math.floor(Math.random() * ALL_NUMS.length)];
+      numImg.src = presetNum(n);
+    }, 90);
+  }
+
+  function stopSpecialLetter(letter) {
+    if (specialLetterTimer) { clearInterval(specialLetterTimer); specialLetterTimer = null; }
+    if (!letter) return;
+    specialLockedLetter = letter;
+    const letterLayer = stage.querySelectorAll('.overlay')[1];
+    if (letterLayer) {
+      const img = letterLayer.querySelector('img');
+      if (img) img.src = presetLetter(letter);
+    }
+  }
+
+  function stopSpecialNumberByTicket(ticket) {
+    if (!ticket) return;
+    if (specialNumberTimer) { clearInterval(specialNumberTimer); specialNumberTimer = null; }
+    const parsed = parseTicket(ticket);
+    const letter = parsed[0], num = parsed[1];
+    const overlays = stage.querySelectorAll('.overlay');
+    const numLayer = overlays[0];
+    const letterLayer = overlays[1];
+    if (numLayer) {
+      const numImg = numLayer.querySelector('img');
+      if (numImg) numImg.src = presetNum(num);
+    }
+    if (letterLayer && letter) {
+      const letterImg = letterLayer.querySelector('img');
+      if (letterImg) letterImg.src = presetLetter(letter);
+    }
   }
 
   /* ─── 补抽展示（全屏，带动画，点击关闭） ─── */
@@ -560,7 +612,10 @@
       case 'third:spinRound': showR1SpinRound(data.picked || []); break;
       case 'third:pick':      showR1Pick(data.picks || []); break;
       case 'third:complete':  showR1Complete(data.letters || []); break;
-      case 'second:start':   showR2Start(data.winners || [], data.spinDuration || 4000); break;
+      case 'second:start':
+      case 'second:startManual':
+        showR2StartManual();
+        break;
       case 'second:complete':showR2Complete(data.numbers || []); break;
       case 'first:start':
         currentPageTickets = (data.tickets || []).slice(0, 16);
@@ -579,6 +634,10 @@
       case 'first:setAbsent':  setAbsentOnScreen(data.ticket || '', !!data.absent); break;
       case 'first:focus':      showFocus(data.ticket || ''); break;
       case 'first:supplement': showSupplement(data.ticket || ''); break;
+      case 'special:start':    startSpecialRolling(); break;
+      case 'special:stopLetter': stopSpecialLetter(data.letter || ''); break;
+      case 'special:stopNumber': stopSpecialNumberByTicket(data.ticket || ''); break;
+      case 'special:cancel':   showBg(4); break;
       case 'special:show':     showSpecial(data.ticket || ''); break;
       case 'special:static':   showSpecialStatic(data.ticket || ''); break;
     }
